@@ -51,6 +51,18 @@ def init_db():
                 timestamp TEXT NOT NULL
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS alert_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                gas_reading INTEGER NOT NULL,
+                threshold INTEGER NOT NULL,
+                simulated INTEGER NOT NULL DEFAULT 1,
+                timestamp TEXT NOT NULL,
+                message TEXT NOT NULL
+            )
+        """)
         connection.commit()
 
 
@@ -66,6 +78,11 @@ def save_reading(reading, mode, threshold, simulated):
     timestamp = datetime.now().isoformat(timespec="seconds")
     status = get_status(reading, threshold)
     with get_db() as connection:
+        previous = connection.execute("""
+            SELECT status FROM readings ORDER BY id DESC LIMIT 1
+        """).fetchone()
+        previous_status = previous["status"] if previous else None
+
         connection.execute("""
             INSERT INTO readings
             (gas_reading, mode, status, threshold, simulated, timestamp)
@@ -74,6 +91,28 @@ def save_reading(reading, mode, threshold, simulated):
             reading, mode, status, threshold,
             1 if simulated else 0, timestamp
         ))
+
+        # Save only meaningful status transitions, not every sensor poll.
+        event_type = None
+        if status in ("CAUTION", "DANGER") and status != previous_status:
+            event_type = "ALERT_STARTED" if previous_status not in ("CAUTION", "DANGER") else "SEVERITY_CHANGED"
+            if event_type == "ALERT_STARTED":
+                message = f"{status} alert started at raw ADC {reading} (threshold {threshold})."
+            else:
+                message = f"Alert severity changed from {previous_status} to {status} at raw ADC {reading} (threshold {threshold})."
+        elif status == "NORMAL" and previous_status in ("CAUTION", "DANGER"):
+            event_type = "RECOVERY"
+            message = f"System returned to NORMAL at raw ADC {reading} (threshold {threshold})."
+
+        if event_type:
+            connection.execute("""
+                INSERT INTO alert_events
+                (event_type, severity, gas_reading, threshold, simulated, timestamp, message)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                event_type, status, reading, threshold,
+                1 if simulated else 0, timestamp, message
+            ))
         connection.commit()
     return {
         "reading": reading,
@@ -292,6 +331,25 @@ def get_history():
         rows = connection.execute("""
             SELECT id, gas_reading, mode, status, threshold, simulated, timestamp
             FROM readings ORDER BY id DESC LIMIT ?
+        """, (limit,)).fetchall()
+    return jsonify([dict(row) for row in rows])
+
+
+@app.route("/api/alerts")
+def get_alerts():
+    """Return persistent alert and recovery events, newest first."""
+    try:
+        limit = int(request.args.get("limit", 50))
+        limit = max(1, min(200, limit))
+    except (ValueError, TypeError):
+        limit = 50
+
+    with get_db() as connection:
+        rows = connection.execute("""
+            SELECT id, event_type, severity, gas_reading, threshold,
+                   simulated, timestamp, message
+            FROM alert_events
+            ORDER BY id DESC LIMIT ?
         """, (limit,)).fetchall()
     return jsonify([dict(row) for row in rows])
 

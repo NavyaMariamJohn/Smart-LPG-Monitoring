@@ -143,8 +143,18 @@
 </div>
  
 <div class="card wide">
-  <h2>Recent status events</h2>
+  <h2>Recent status events (this browser session)</h2>
   <ul id="history"><li>No events yet.</li></ul>
+</div>
+
+<div class="card wide">
+  <div class="head">
+    <h2>Smart Alert Timeline</h2>
+    <span class="small" id="alertTimelineUpdated">Loading alert events...</span>
+  </div>
+  <div class="msg" id="alertTimelineMsg" role="status">Loading saved alert events&hellip;</div>
+  <ul id="alertTimeline"><li>No saved alert events yet.</li></ul>
+  <div class="small">Persistent events are saved when status changes into CAUTION/DANGER or returns to NORMAL. Readings are raw ADC values, not calibrated gas concentrations.</div>
 </div>
  
 <div class="card wide">
@@ -202,7 +212,9 @@
     historyBody: $("historyBody"), historyMsg: $("historyMsg"),
     historyUpdated: $("historyUpdated"), btnRefresh: $("btnRefreshHistory"),
     subtitle: $("subtitle"), sourceBanner: $("sourceBanner"), chartTitle: $("chartTitle"),
-    savedHistoryTitle: $("savedHistoryTitle"), btnHardware: $("btnHardware"), btnSimulation: $("btnSimulation")
+    savedHistoryTitle: $("savedHistoryTitle"), btnHardware: $("btnHardware"), btnSimulation: $("btnSimulation"),
+    alertTimeline: $("alertTimeline"), alertTimelineMsg: $("alertTimelineMsg"),
+    alertTimelineUpdated: $("alertTimelineUpdated")
   };
  
   // ---------- Chart (created exactly once) ----------
@@ -425,6 +437,7 @@
       .then(function (data) {
         applyReading(data);
         loadHistoryAndStats();   // the click saved a record, so show it
+        loadAlertTimeline();     // update persistent alert timeline immediately too
       })
       .catch(function (err) { console.error("Simulation failed:", err); });
   }
@@ -468,6 +481,46 @@
     });
   }
  
+  function renderAlertTimeline(events) {
+    el.alertTimeline.innerHTML = "";
+    if (!events.length) {
+      var empty = document.createElement("li");
+      empty.textContent = "No saved alert events yet. Try simulation mode and generate a warning or danger event.";
+      el.alertTimeline.appendChild(empty);
+      el.alertTimelineMsg.textContent = "";
+      el.alertTimelineMsg.style.display = "none";
+      return;
+    }
+
+    events.forEach(function (event) {
+      var li = document.createElement("li");
+      var time = document.createElement("time");
+      time.textContent = formatTime(event.timestamp);
+      var detail = document.createElement("span");
+      var source = event.simulated === 1 || event.simulated === true ? "Simulation" : "Hardware";
+      detail.textContent = "[" + event.severity + "] " + event.message + " Source: " + source + ".";
+      detail.className = event.severity === "NORMAL" ? "NORMAL" : (event.severity || "");
+      li.appendChild(time);
+      li.appendChild(detail);
+      el.alertTimeline.appendChild(li);
+    });
+    el.alertTimelineMsg.textContent = "";
+    el.alertTimelineMsg.style.display = "none";
+  }
+
+  function loadAlertTimeline() {
+    getJson("/api/alerts?limit=50").then(function (data) {
+      renderAlertTimeline(Array.isArray(data) ? data : []);
+      el.alertTimelineUpdated.textContent = "Updated " + new Date().toLocaleTimeString();
+    }).catch(function (err) {
+      console.error("Alert timeline failed:", err);
+      el.alertTimelineMsg.textContent = "Could not load the alert timeline. Check the Flask server and /api/alerts.";
+      el.alertTimelineMsg.className = "msg error";
+      el.alertTimelineMsg.style.display = "";
+      el.alertTimelineUpdated.textContent = "Update failed";
+    });
+  }
+
   function loadHistoryAndStats() {
     if (historyLoading) return;
     historyLoading = true;
@@ -516,7 +569,9 @@
   renderThreshold();
   poll();
   loadHistoryAndStats();
+  loadAlertTimeline();
   setInterval(loadHistoryAndStats, HISTORY_MS);
+  setInterval(loadAlertTimeline, HISTORY_MS);
 })();
 </script>
 </body>
