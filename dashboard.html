@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart LPG Monitoring System</title>
+<style>
+  :root {
+    --bg:#0f1318; --card:#181e26; --line:#27303b; --text:#e6ebf1; --muted:#8a96a5;
+    --normal:#3ecf8e; --caution:#f5b942; --danger:#ff5d5d;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--text);
+         font-family:"Segoe UI",system-ui,sans-serif; }
+  h1 { margin:0 0 4px; font-size:1.5rem; }
+  .sub { color:var(--muted); margin:0 0 20px; font-size:.9rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { margin:0 0 8px; font-size:.85rem; font-weight:500; color:var(--muted); }
+  .big { font-size:2rem; font-weight:600; }
+  .small { font-size:.8rem; color:var(--muted); margin-top:4px; }
+  .NORMAL { color:var(--normal); } .CAUTION { color:var(--caution); } .DANGER { color:var(--danger); }
+  .card.status-NORMAL { border-color:var(--normal); }
+  .card.status-CAUTION { border-color:var(--caution); }
+  .card.status-DANGER { border-color:var(--danger); }
+  .wide { margin-bottom:16px; }
+  .chart-box { position:relative; height:280px; }
+  input[type=range] { width:100%; accent-color:var(--caution); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  button { background:#222b36; color:var(--text); border:1px solid var(--line); border-radius:8px;
+           padding:10px 16px; font-size:.95rem; cursor:pointer; }
+  button:hover { background:#2c3745; }
+  button:disabled { opacity:.6; cursor:wait; }
+  button:focus-visible, input:focus-visible { outline:2px solid #6aa9ff; outline-offset:2px; }
+  button.active { border-color:#6aa9ff; }
+  ul { list-style:none; margin:0; padding:0; max-height:220px; overflow-y:auto; }
+  li { padding:8px 0; border-bottom:1px solid var(--line); font-size:.9rem; display:flex; gap:12px; }
+  li time { color:var(--muted); min-width:90px; }
+  .banner { background:#2a2312; border:1px solid #5b4a1a; color:var(--caution);
+            border-radius:8px; padding:8px 12px; font-size:.85rem; margin-bottom:16px; }
+  .head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+  .head h2 { margin:0; }
+  .msg { font-size:.85rem; margin:8px 0; color:var(--muted); }
+  .msg.error { color:var(--danger); background:#2a1515; border:1px solid #5b2222; border-radius:8px; padding:8px 12px; }
+  .table-wrap { overflow-x:auto; max-height:360px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; }
+  table { width:100%; border-collapse:collapse; font-size:.88rem; min-width:520px; }
+  th, td { text-align:left; padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { position:sticky; top:0; background:#1e2630; color:var(--muted); font-weight:500; }
+  tr:last-child td { border-bottom:none; }
+</style>
+</head>
+<body>
+ 
+<h1>Smart LPG Monitoring System</h1>
+<p class="sub">Simulated data only &ndash; no real gas sensor is connected.</p>
+<div class="banner">All readings, statistics and history below are SIMULATED for demonstration. They are not real sensor measurements.</div>
+ 
+<div class="grid">
+  <div class="card">
+    <h2>Current reading (simulated)</h2>
+    <div class="big"><span id="reading">--</span> <span class="small">units</span></div>
+    <div class="small" id="modeLabel">Mode: --</div>
+  </div>
+  <div class="card" id="statusCard">
+    <h2>System status</h2>
+    <div class="big" id="status">--</div>
+    <div class="small" id="statusRule"></div>
+  </div>
+  <div class="card">
+    <h2>Alert events</h2>
+    <div class="big" id="alertCount">0</div>
+    <div class="small">Times status rose to CAUTION or DANGER</div>
+  </div>
+  <div class="card">
+    <h2>Last update</h2>
+    <div class="big" id="lastUpdate" style="font-size:1.4rem">--</div>
+  </div>
+  <div class="card">
+    <h2>Total database readings (simulated)</h2>
+    <div class="big" id="statTotal">--</div>
+    <div class="small">Saved in lpg_monitor.db</div>
+  </div>
+  <div class="card">
+    <h2>Highest recorded reading (simulated)</h2>
+    <div class="big" id="statMax">--</div>
+    <div class="small">Across all saved records</div>
+  </div>
+</div>
+ 
+<div class="card wide">
+  <h2>Gas-level trend (simulated)</h2>
+  <div class="chart-box"><canvas id="trendChart"></canvas></div>
+</div>
+ 
+<div class="grid">
+  <div class="card">
+    <h2>Warning threshold: <strong id="thresholdValue">300</strong></h2>
+    <input type="range" id="thresholdSlider" min="100" max="800" step="10" value="300"
+           aria-label="Warning threshold">
+    <div class="small">CAUTION at <span id="cautionAt">300</span> &middot; DANGER at <span id="dangerAt">500</span></div>
+  </div>
+  <div class="card">
+    <h2>Simulate</h2>
+    <div class="row">
+      <button type="button" id="btnNormal" data-mode="normal">Simulate Normal</button>
+      <button type="button" id="btnWarning" data-mode="warning">Simulate Warning</button>
+      <button type="button" id="btnDanger" data-mode="danger">Simulate Danger</button>
+    </div>
+  </div>
+</div>
+ 
+<div class="card wide">
+  <h2>Recent events</h2>
+  <ul id="history"><li>No events yet.</li></ul>
+</div>
+ 
+<div class="card wide">
+  <div class="head">
+    <h2>Saved history (simulated readings, latest 50)</h2>
+    <div class="row">
+      <span class="small" id="historyUpdated">Not loaded yet</span>
+      <button type="button" id="btnRefreshHistory">Refresh History</button>
+    </div>
+  </div>
+  <div class="msg" id="historyMsg" role="status">Loading history&hellip;</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Timestamp</th><th>Reading</th><th>Mode</th><th>Status</th><th>Threshold</th></tr>
+      </thead>
+      <tbody id="historyBody"></tbody>
+    </table>
+  </div>
+  <div class="small">Status and threshold are the values saved with each record at the time it was created.</div>
+</div>
+ 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  "use strict";
+ 
+  // ---------- Settings ----------
+  var POLL_MS = 2000;            // live reading (this endpoint saves a new reading each call)
+  var HISTORY_MS = 10000;        // history + stats refresh (read-only, saves nothing)
+  var HISTORY_LIMIT = 50;
+  var MAX_POINTS = 30;
+  var DANGER_OFFSET = 200;       // DANGER starts at threshold + 200
+  var MAX_EVENTS = 15;
+ 
+  // ---------- State ----------
+  var threshold = 300;
+  var lastReading = null;
+  var lastStatus = null;
+  var alertCount = 0;
+  var epoch = 0;                 // bumped on every button click to discard stale poll replies
+  var eventsEmpty = true;
+  var historyLoading = false;    // prevents overlapping history requests
+ 
+  // ---------- Elements ----------
+  function $(id) { return document.getElementById(id); }
+  var el = {
+    reading: $("reading"), modeLabel: $("modeLabel"), status: $("status"),
+    statusCard: $("statusCard"), statusRule: $("statusRule"), alertCount: $("alertCount"),
+    lastUpdate: $("lastUpdate"), slider: $("thresholdSlider"), thresholdValue: $("thresholdValue"),
+    cautionAt: $("cautionAt"), dangerAt: $("dangerAt"), events: $("history"),
+    statTotal: $("statTotal"), statMax: $("statMax"),
+    historyBody: $("historyBody"), historyMsg: $("historyMsg"),
+    historyUpdated: $("historyUpdated"), btnRefresh: $("btnRefreshHistory")
+  };
+ 
+  // ---------- Chart (created exactly once) ----------
+  var chart = new Chart($("trendChart").getContext("2d"), {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        { label: "Simulated reading", data: [], borderColor: "#6aa9ff", backgroundColor: "rgba(106,169,255,.15)",
+          fill: true, tension: 0.3, pointRadius: 2 },
+        { label: "Caution threshold", data: [], borderColor: "#f5b942", borderDash: [6, 4], pointRadius: 0, fill: false },
+        { label: "Danger threshold", data: [], borderColor: "#ff5d5d", borderDash: [6, 4], pointRadius: 0, fill: false }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      scales: {
+        x: { ticks: { color: "#8a96a5", maxTicksLimit: 8 }, grid: { color: "#27303b" } },
+        y: { beginAtZero: true, ticks: { color: "#8a96a5" }, grid: { color: "#27303b" } }
+      },
+      plugins: { legend: { labels: { color: "#e6ebf1" } } }
+    }
+  });
+ 
+  // ---------- Helpers ----------
+  function getStatus(reading, t) {
+    if (reading >= t + DANGER_OFFSET) return "DANGER";
+    if (reading >= t) return "CAUTION";
+    return "NORMAL";
+  }
+  function rank(s) { return s === "DANGER" ? 2 : s === "CAUTION" ? 1 : 0; }
+ 
+  // The backend may name the value "reading" or "gas_reading"; accept both.
+  function readingOf(obj) {
+    if (obj == null) return null;
+    var v = obj.gas_reading !== undefined ? obj.gas_reading : obj.reading;
+    v = Number(v);
+    return isNaN(v) ? null : v;
+  }
+  function formatTime(ts) {
+    if (!ts) return "--";
+    var d = new Date(String(ts).replace(" ", "T"));
+    return isNaN(d) ? String(ts) : d.toLocaleString();
+  }
+  function getJson(url, options) {
+    return fetch(url, options).then(function (r) {
+      if (!r.ok) throw new Error("Server answered " + r.status + " for " + url);
+      return r.json();
+    });
+  }
+ 
+  // ---------- Recent events (this browser session) ----------
+  function addEvent(text) {
+    if (eventsEmpty) { el.events.innerHTML = ""; eventsEmpty = false; }
+    var li = document.createElement("li");
+    var time = document.createElement("time");
+    time.textContent = new Date().toLocaleTimeString();
+    var span = document.createElement("span");
+    span.textContent = text;
+    li.appendChild(time); li.appendChild(span);
+    el.events.insertBefore(li, el.events.firstChild);
+    while (el.events.children.length > MAX_EVENTS) el.events.removeChild(el.events.lastChild);
+  }
+ 
+  // ---------- Threshold + status rendering ----------
+  function renderThreshold() {
+    el.thresholdValue.textContent = threshold;
+    el.cautionAt.textContent = threshold;
+    el.dangerAt.textContent = threshold + DANGER_OFFSET;
+    el.statusRule.textContent = "Normal below " + threshold + ", danger from " + (threshold + DANGER_OFFSET);
+    var n = chart.data.labels.length;
+    chart.data.datasets[1].data = new Array(n).fill(threshold);
+    chart.data.datasets[2].data = new Array(n).fill(threshold + DANGER_OFFSET);
+    chart.update("none");
+  }
+ 
+  function refreshStatus(reason) {
+    if (lastReading === null) return;
+    var s = getStatus(lastReading, threshold);
+    el.status.textContent = s;
+    el.status.className = "big " + s;
+    el.statusCard.className = "card status-" + s;
+    if (s !== lastStatus) {
+      if (lastStatus !== null && rank(s) > rank(lastStatus)) {
+        alertCount += 1;
+        el.alertCount.textContent = alertCount;
+      }
+      addEvent("Status " + (lastStatus || "start") + " \u2192 " + s +
+               " (simulated reading " + lastReading + ", threshold " + threshold + ")" +
+               (reason ? " \u2013 " + reason : ""));
+      lastStatus = s;
+    }
+  }
+ 
+  function applyReading(data) {
+    var value = readingOf(data);
+    if (value === null) { console.error("Unexpected reading response:", data); return; }
+    lastReading = value;
+    el.reading.textContent = value;
+    el.modeLabel.textContent = "Simulated mode: " + (data.mode || "--");
+    var t = data.timestamp ? new Date(String(data.timestamp).replace(" ", "T")) : new Date();
+    if (isNaN(t)) t = new Date();
+    var label = t.toLocaleTimeString();
+    el.lastUpdate.textContent = label;
+ 
+    chart.data.labels.push(label);
+    chart.data.datasets[0].data.push(value);
+    chart.data.datasets[1].data.push(threshold);
+    chart.data.datasets[2].data.push(threshold + DANGER_OFFSET);
+    if (chart.data.labels.length > MAX_POINTS) {
+      chart.data.labels.shift();
+      chart.data.datasets.forEach(function (d) { d.data.shift(); });
+    }
+    chart.update("none");
+ 
+    ["normal", "warning", "danger"].forEach(function (m) {
+      $("btn" + m.charAt(0).toUpperCase() + m.slice(1)).classList.toggle("active", m === data.mode);
+    });
+    refreshStatus("");
+  }
+ 
+  // ---------- Live polling (one timer chain, never overlaps) ----------
+  // The threshold is sent as an extra query value; the backend may ignore it.
+  function poll() {
+    var myEpoch = epoch;
+    getJson("/api/reading?threshold=" + threshold)
+      .then(function (data) { if (myEpoch === epoch) applyReading(data); })
+      .catch(function (err) { console.error("Polling failed:", err); })
+      .then(function () { setTimeout(poll, POLL_MS); });
+  }
+ 
+  // ---------- Simulation buttons ----------
+  function simulate(mode) {
+    epoch += 1;                  // invalidates any poll already in flight
+    getJson("/api/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: mode, threshold: threshold })
+    })
+      .then(function (data) {
+        applyReading(data);
+        loadHistoryAndStats();   // the click saved a record, so show it
+      })
+      .catch(function (err) { console.error("Simulation failed:", err); });
+  }
+ 
+  // ---------- Database history + stats (read-only requests) ----------
+  function setHistoryMessage(text, isError) {
+    el.historyMsg.textContent = text;
+    el.historyMsg.className = "msg" + (isError ? " error" : "");
+    el.historyMsg.style.display = text ? "" : "none";
+  }
+ 
+  function renderStats(stats) {
+    var total = stats.total_readings !== undefined ? stats.total_readings :
+                stats.total !== undefined ? stats.total : stats.count;
+    var max = stats.highest_reading !== undefined ? stats.highest_reading :
+              stats.max_reading !== undefined ? stats.max_reading :
+              stats.highest !== undefined ? stats.highest : stats.max;
+    el.statTotal.textContent = (total === undefined || total === null) ? "--" : total;
+    el.statMax.textContent = (max === undefined || max === null) ? "--" : max;
+  }
+ 
+  function renderHistory(rows) {
+    el.historyBody.innerHTML = "";
+    rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      var status = String(row.status || "").toUpperCase();
+      var cells = [
+        formatTime(row.timestamp),
+        readingOf(row) === null ? "--" : readingOf(row),
+        row.mode || "--",
+        status || "--",
+        row.threshold === undefined || row.threshold === null ? "--" : row.threshold
+      ];
+      cells.forEach(function (text, i) {
+        var td = document.createElement("td");
+        td.textContent = text;
+        if (i === 3 && (status === "NORMAL" || status === "CAUTION" || status === "DANGER")) td.className = status;
+        tr.appendChild(td);
+      });
+      el.historyBody.appendChild(tr);
+    });
+  }
+ 
+  function loadHistoryAndStats() {
+    if (historyLoading) return;
+    historyLoading = true;
+    el.btnRefresh.disabled = true;
+ 
+    var historyReq = getJson("/api/history?limit=" + HISTORY_LIMIT).then(function (data) {
+      var rows = Array.isArray(data) ? data : (data.history || data.readings || data.records || []);
+      renderHistory(rows);
+      setHistoryMessage(rows.length ? "" : "No saved readings yet. They appear once the dashboard has generated some.", false);
+      el.historyUpdated.textContent = "Updated " + new Date().toLocaleTimeString();
+    }).catch(function (err) {
+      console.error("History failed:", err);
+      setHistoryMessage("Could not load saved history. Check that the Flask server is running and " +
+                        "that /api/history works, then press Refresh History.", true);
+    });
+ 
+    var statsReq = getJson("/api/stats").then(renderStats).catch(function (err) {
+      console.error("Stats failed:", err);
+      el.statTotal.textContent = "n/a";
+      el.statMax.textContent = "n/a";
+    });
+ 
+    Promise.all([historyReq, statsReq]).then(function () {
+      historyLoading = false;
+      el.btnRefresh.disabled = false;
+    });
+  }
+ 
+  // ---------- Wire up events (each added exactly once) ----------
+  el.slider.addEventListener("input", function () {
+    threshold = parseInt(el.slider.value, 10);
+    renderThreshold();
+    refreshStatus("threshold changed");
+  });
+ 
+  document.querySelectorAll("button[data-mode]").forEach(function (btn) {
+    btn.addEventListener("click", function () { simulate(btn.getAttribute("data-mode")); });
+  });
+ 
+  el.btnRefresh.addEventListener("click", loadHistoryAndStats);
+ 
+  // ---------- Start ----------
+  threshold = parseInt(el.slider.value, 10);
+  renderThreshold();
+  poll();
+  loadHistoryAndStats();
+  setInterval(loadHistoryAndStats, HISTORY_MS);
+})();
+</script>
+</body>
+</html>
+ 
+
