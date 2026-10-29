@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 import random
 import re
@@ -7,7 +9,7 @@ import time
 from datetime import datetime
 
 import serial
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "lpg_monitor.db")
@@ -247,6 +249,36 @@ def simulate():
     payload["source"] = "simulation"
     payload["connected"] = _state["serial_connected"]
     return jsonify(payload)
+
+
+@app.route("/api/export.csv")
+def export_csv():
+    """Download every saved reading as a CSV file, oldest first."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["ID", "Timestamp", "Reading (raw ADC)", "Source", "Mode", "Status", "Threshold"])
+
+    with get_db() as connection:
+        rows = connection.execute("""
+            SELECT id, timestamp, gas_reading, simulated, mode, status, threshold
+            FROM readings
+            ORDER BY id ASC
+        """).fetchall()
+
+    for row in rows:
+        writer.writerow([
+            row["id"], row["timestamp"], row["gas_reading"],
+            "Simulation" if row["simulated"] else "Hardware",
+            row["mode"], row["status"], row["threshold"]
+        ])
+
+    csv_data = "\ufeff" + output.getvalue()  # Helps spreadsheet apps display UTF-8 correctly.
+    filename = "smart_lpg_readings_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".csv"
+    return Response(
+        csv_data,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @app.route("/api/history")

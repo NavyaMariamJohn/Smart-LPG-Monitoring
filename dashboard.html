@@ -41,6 +41,9 @@
   button { background:#1c2a3d; color:var(--text); border:1px solid #33465f; border-radius:10px; padding:10px 14px; font-size:.9rem; font-weight:650; cursor:pointer; transition:background .16s ease,border-color .16s ease,transform .16s ease; }
   button:hover { background:#263b55; border-color:#5a789e; transform:translateY(-1px); }
   button:active { transform:translateY(0); }
+  .export-link { display:inline-flex; align-items:center; justify-content:center; gap:7px; background:#173a32; color:#8ff0c8; border:1px solid #2b8066; border-radius:10px; padding:10px 14px; font-size:.9rem; font-weight:700; text-decoration:none; transition:background .16s ease,border-color .16s ease,transform .16s ease; }
+  .export-link:hover { background:#205044; border-color:#42d6a0; transform:translateY(-1px); }
+  .export-link:focus-visible { outline:2px solid var(--normal); outline-offset:3px; }
   button:disabled { opacity:.6; cursor:wait; transform:none; }
   button:focus-visible, input:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
   button.active { background:#203c60; border-color:var(--blue); box-shadow:0 0 0 1px rgba(120,170,255,.16) inset; }
@@ -149,6 +152,7 @@
     <h2 id="savedHistoryTitle">Saved history (latest 50)</h2>
     <div class="row">
       <span class="small" id="historyUpdated">Not loaded yet</span>
+      <a class="export-link" href="/api/export.csv" title="Download all saved readings as a CSV file">Export CSV</a>
       <button type="button" id="btnRefreshHistory">Refresh History</button>
     </div>
   </div>
@@ -161,7 +165,7 @@
       <tbody id="historyBody"></tbody>
     </table>
   </div>
-  <div class="small">Status and threshold are the values saved with each record at the time it was created.</div>
+  <div class="small">Status and threshold are saved with each record. Export CSV downloads all saved records, not just the latest 50 shown here.</div>
 </div>
  
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
