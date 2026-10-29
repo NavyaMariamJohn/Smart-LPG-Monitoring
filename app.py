@@ -172,7 +172,17 @@ def get_reading():
         payload = save_reading(reading, mode, threshold, simulated=True)
         payload["source"] = "simulation"
         payload["connected"] = connected
+        payload["stale"] = False
+        payload["age_seconds"] = 0
         return jsonify(payload)
+
+    age_seconds = None
+    if timestamp:
+        try:
+            age_seconds = max(0, int((datetime.now() - datetime.fromisoformat(timestamp)).total_seconds()))
+        except (TypeError, ValueError):
+            age_seconds = None
+    stale = age_seconds is None or age_seconds > 5
 
     if reading is None:
         return jsonify({
@@ -183,6 +193,8 @@ def get_reading():
             "simulated": False,
             "source": "hardware",
             "connected": connected,
+            "stale": True,
+            "age_seconds": age_seconds,
             "error": error,
             "timestamp": timestamp,
         })
@@ -195,6 +207,9 @@ def get_reading():
         "simulated": False,
         "source": "hardware",
         "connected": connected,
+        "stale": stale,
+        "age_seconds": age_seconds,
+        "error": error,
         "timestamp": timestamp,
     })
 

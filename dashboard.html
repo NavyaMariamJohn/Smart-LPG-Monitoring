@@ -181,6 +181,7 @@
   var threshold = 300;
   var lastReading = null;
   var lastStatus = null;
+  var isStale = false;
   var alertCount = 0;
   var epoch = 0;                 // bumped on every button click to discard stale poll replies
   var eventsEmpty = true;
@@ -275,7 +276,7 @@
   }
  
   function refreshStatus(reason) {
-    if (lastReading === null) return;
+    if (lastReading === null || isStale) return;
     var s = getStatus(lastReading, threshold);
     el.status.textContent = s;
     el.status.className = "big " + s;
@@ -307,13 +308,14 @@
     el.btnHardware.classList.toggle("active", source === "hardware");
     el.btnSimulation.classList.toggle("active", source === "simulation");
 
-    if (source === "hardware" && connected === false && data.status === "WAITING") {
+    if (source === "hardware" && data.status === "WAITING" && !data.timestamp) {
+      isStale = true;
       el.reading.textContent = "--";
       el.modeLabel.textContent = "Waiting for Arduino sensor data";
       el.status.textContent = "DISCONNECTED";
       el.status.className = "big DANGER";
       el.statusCard.className = "card status-DANGER";
-      el.statusRule.textContent = "Check USB connection and COM port";
+      el.statusRule.textContent = "Check USB connection, COM port, and Arduino power";
       el.lastUpdate.textContent = "--";
       return;
     }
@@ -326,7 +328,27 @@
     var t = data.timestamp ? new Date(String(data.timestamp).replace(" ", "T")) : new Date();
     if (isNaN(t)) t = new Date();
     var label = t.toLocaleTimeString();
-    el.lastUpdate.textContent = label;
+    var ageSeconds = (typeof data.age_seconds === "number") ? data.age_seconds : Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000));
+    isStale = source === "hardware" && (data.stale === true || connected === false || ageSeconds > 5);
+    el.lastUpdate.textContent = label + (isStale ? " · STALE" : "");
+
+    if (isStale) {
+      el.sourceBanner.textContent = "STALE SENSOR DATA: no fresh Arduino reading for " + ageSeconds + " seconds. Check the USB connection, COM port, and Arduino output. The displayed value may be old; do not rely on this dashboard for safety alerts.";
+      el.sourceBanner.style.background = "#2a1515";
+      el.sourceBanner.style.borderColor = "#7f3030";
+      el.sourceBanner.style.color = "#ff7777";
+      el.status.textContent = "STALE DATA";
+      el.status.className = "big DANGER";
+      el.statusCard.className = "card status-DANGER";
+      el.statusRule.textContent = "Last reading " + ageSeconds + " seconds ago; live status unavailable";
+    } else {
+      el.sourceBanner.textContent = source === "hardware"
+        ? "REAL HARDWARE MODE: fresh readings are arriving from the Arduino. Values are raw ADC readings, not calibrated gas concentrations."
+        : "SIMULATION MODE: readings are generated for demonstration and are not real sensor measurements.";
+      el.sourceBanner.style.background = source === "hardware" ? "#142820" : "#2a2312";
+      el.sourceBanner.style.borderColor = source === "hardware" ? "#236746" : "#5b4a1a";
+      el.sourceBanner.style.color = source === "hardware" ? "#3ecf8e" : "#f5b942";
+    }
  
     chart.data.labels.push(label);
     chart.data.datasets[0].data.push(value);
@@ -341,7 +363,11 @@
     ["normal", "warning", "danger"].forEach(function (m) {
       $("btn" + m.charAt(0).toUpperCase() + m.slice(1)).classList.toggle("active", m === data.mode);
     });
-    refreshStatus("");
+    if (isStale) {
+      lastStatus = null; // Don't count stale data as a new alert transition.
+    } else {
+      refreshStatus("");
+    }
   }
  
   // ---------- Live polling (one timer chain, never overlaps) ----------
@@ -350,7 +376,18 @@
     var myEpoch = epoch;
     getJson("/api/reading?threshold=" + threshold)
       .then(function (data) { if (myEpoch === epoch) applyReading(data); })
-      .catch(function (err) { console.error("Polling failed:", err); })
+      .catch(function (err) {
+        console.error("Polling failed:", err);
+        isStale = true;
+        el.sourceBanner.textContent = "DASHBOARD CONNECTION ERROR: cannot reach Flask. Check that python app.py is running.";
+        el.sourceBanner.style.background = "#2a1515";
+        el.sourceBanner.style.borderColor = "#7f3030";
+        el.sourceBanner.style.color = "#ff7777";
+        el.status.textContent = "NO SERVER";
+        el.status.className = "big DANGER";
+        el.statusCard.className = "card status-DANGER";
+        el.statusRule.textContent = "Live status unavailable";
+      })
       .then(function () { setTimeout(poll, POLL_MS); });
   }
  
