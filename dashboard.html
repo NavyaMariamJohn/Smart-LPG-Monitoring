@@ -52,12 +52,12 @@
 <body>
  
 <h1>Smart LPG Monitoring System</h1>
-<p class="sub">Simulated data only &ndash; no real gas sensor is connected.</p>
-<div class="banner">All readings, statistics and history below are SIMULATED for demonstration. They are not real sensor measurements.</div>
+<p class="sub" id="subtitle">Arduino sensor dashboard</p>
+<div class="banner" id="sourceBanner">Checking sensor connection...</div>
  
 <div class="grid">
   <div class="card">
-    <h2>Current reading (simulated)</h2>
+    <h2>Current reading</h2>
     <div class="big"><span id="reading">--</span> <span class="small">units</span></div>
     <div class="small" id="modeLabel">Mode: --</div>
   </div>
@@ -76,19 +76,19 @@
     <div class="big" id="lastUpdate" style="font-size:1.4rem">--</div>
   </div>
   <div class="card">
-    <h2>Total database readings (simulated)</h2>
+    <h2>Total database readings</h2>
     <div class="big" id="statTotal">--</div>
     <div class="small">Saved in lpg_monitor.db</div>
   </div>
   <div class="card">
-    <h2>Highest recorded reading (simulated)</h2>
+    <h2>Highest recorded reading</h2>
     <div class="big" id="statMax">--</div>
     <div class="small">Across all saved records</div>
   </div>
 </div>
  
 <div class="card wide">
-  <h2>Gas-level trend (simulated)</h2>
+  <h2 id="chartTitle">Gas-level trend</h2>
   <div class="chart-box"><canvas id="trendChart"></canvas></div>
 </div>
  
@@ -100,7 +100,11 @@
     <div class="small">CAUTION at <span id="cautionAt">300</span> &middot; DANGER at <span id="dangerAt">500</span></div>
   </div>
   <div class="card">
-    <h2>Simulate</h2>
+    <h2>Data source and simulation</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button type="button" id="btnHardware" data-source="hardware">Use Real Hardware</button>
+      <button type="button" id="btnSimulation" data-source="simulation">Use Simulation</button>
+    </div>
     <div class="row">
       <button type="button" id="btnNormal" data-mode="normal">Simulate Normal</button>
       <button type="button" id="btnWarning" data-mode="warning">Simulate Warning</button>
@@ -116,7 +120,7 @@
  
 <div class="card wide">
   <div class="head">
-    <h2>Saved history (simulated readings, latest 50)</h2>
+    <h2 id="savedHistoryTitle">Saved history (latest 50)</h2>
     <div class="row">
       <span class="small" id="historyUpdated">Not loaded yet</span>
       <button type="button" id="btnRefreshHistory">Refresh History</button>
@@ -126,7 +130,7 @@
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Timestamp</th><th>Reading</th><th>Mode</th><th>Status</th><th>Threshold</th></tr>
+        <tr><th>Timestamp</th><th>Reading</th><th>Source</th><th>Status</th><th>Threshold</th></tr>
       </thead>
       <tbody id="historyBody"></tbody>
     </table>
@@ -165,7 +169,9 @@
     cautionAt: $("cautionAt"), dangerAt: $("dangerAt"), events: $("history"),
     statTotal: $("statTotal"), statMax: $("statMax"),
     historyBody: $("historyBody"), historyMsg: $("historyMsg"),
-    historyUpdated: $("historyUpdated"), btnRefresh: $("btnRefreshHistory")
+    historyUpdated: $("historyUpdated"), btnRefresh: $("btnRefreshHistory"),
+    subtitle: $("subtitle"), sourceBanner: $("sourceBanner"), chartTitle: $("chartTitle"),
+    savedHistoryTitle: $("savedHistoryTitle"), btnHardware: $("btnHardware"), btnSimulation: $("btnSimulation")
   };
  
   // ---------- Chart (created exactly once) ----------
@@ -174,7 +180,7 @@
     data: {
       labels: [],
       datasets: [
-        { label: "Simulated reading", data: [], borderColor: "#6aa9ff", backgroundColor: "rgba(106,169,255,.15)",
+        { label: "Sensor reading", data: [], borderColor: "#6aa9ff", backgroundColor: "rgba(106,169,255,.15)",
           fill: true, tension: 0.3, pointRadius: 2 },
         { label: "Caution threshold", data: [], borderColor: "#f5b942", borderDash: [6, 4], pointRadius: 0, fill: false },
         { label: "Danger threshold", data: [], borderColor: "#ff5d5d", borderDash: [6, 4], pointRadius: 0, fill: false }
@@ -254,18 +260,43 @@
         el.alertCount.textContent = alertCount;
       }
       addEvent("Status " + (lastStatus || "start") + " \u2192 " + s +
-               " (simulated reading " + lastReading + ", threshold " + threshold + ")" +
+               " (" + lastReading + ", threshold " + threshold + ")" +
                (reason ? " \u2013 " + reason : ""));
       lastStatus = s;
     }
   }
  
   function applyReading(data) {
+    var source = data.source || (data.simulated ? "simulation" : "hardware");
+    var connected = data.connected;
+    el.subtitle.textContent = source === "hardware" ? "Live Arduino UNO + MQ-2 sensor data" : "Simulation mode — generated demonstration readings";
+    el.sourceBanner.textContent = source === "hardware"
+      ? (connected ? "REAL HARDWARE MODE: readings are received from the Arduino. Raw sensor values are not calibrated gas concentrations." : "HARDWARE DISCONNECTED: waiting for Arduino sensor data. Do not rely on this dashboard for safety alerts.")
+      : "SIMULATION MODE: readings are generated for demonstration and are not real sensor measurements.";
+    el.sourceBanner.style.background = source === "hardware" ? (connected ? "#142820" : "#2a1515") : "#2a2312";
+    el.sourceBanner.style.borderColor = source === "hardware" ? (connected ? "#236746" : "#5b2222") : "#5b4a1a";
+    el.sourceBanner.style.color = source === "hardware" ? (connected ? "#3ecf8e" : "#ff5d5d") : "#f5b942";
+    el.chartTitle.textContent = source === "hardware" ? "Gas-level trend (real sensor input)" : "Gas-level trend (simulated)";
+    el.savedHistoryTitle.textContent = "Saved history (latest " + HISTORY_LIMIT + ")";
+    el.btnHardware.classList.toggle("active", source === "hardware");
+    el.btnSimulation.classList.toggle("active", source === "simulation");
+
+    if (source === "hardware" && connected === false) {
+      el.reading.textContent = "--";
+      el.modeLabel.textContent = "Waiting for Arduino sensor data";
+      el.status.textContent = "DISCONNECTED";
+      el.status.className = "big DANGER";
+      el.statusCard.className = "card status-DANGER";
+      el.statusRule.textContent = "Check USB connection and COM port";
+      el.lastUpdate.textContent = "--";
+      return;
+    }
+
     var value = readingOf(data);
     if (value === null) { console.error("Unexpected reading response:", data); return; }
     lastReading = value;
     el.reading.textContent = value;
-    el.modeLabel.textContent = "Simulated mode: " + (data.mode || "--");
+    el.modeLabel.textContent = source === "hardware" ? "Source: Arduino hardware" : "Simulated mode: " + (data.mode || "--");
     var t = data.timestamp ? new Date(String(data.timestamp).replace(" ", "T")) : new Date();
     if (isNaN(t)) t = new Date();
     var label = t.toLocaleTimeString();
@@ -298,6 +329,23 @@
   }
  
   // ---------- Simulation buttons ----------
+  function switchSource(source) {
+    epoch += 1;
+    getJson("/api/source", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: source })
+    }).then(function () {
+      if (source === "simulation") {
+        // Ask the existing simulation endpoint for an initial generated reading.
+        simulate("normal");
+      }
+    }).catch(function (err) {
+      console.error("Could not change data source:", err);
+      el.sourceBanner.textContent = "Could not change data source. Check the Flask server.";
+    });
+  }
+
   function simulate(mode) {
     epoch += 1;                  // invalidates any poll already in flight
     getJson("/api/simulate", {
@@ -337,7 +385,7 @@
       var cells = [
         formatTime(row.timestamp),
         readingOf(row) === null ? "--" : readingOf(row),
-        row.mode || "--",
+        row.simulated === 1 || row.simulated === true ? "Simulation" : "Hardware",
         status || "--",
         row.threshold === undefined || row.threshold === null ? "--" : row.threshold
       ];
@@ -391,6 +439,8 @@
   });
  
   el.btnRefresh.addEventListener("click", loadHistoryAndStats);
+  el.btnHardware.addEventListener("click", function () { switchSource("hardware"); });
+  el.btnSimulation.addEventListener("click", function () { switchSource("simulation"); });
  
   // ---------- Start ----------
   threshold = parseInt(el.slider.value, 10);
