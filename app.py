@@ -1,4 +1,3 @@
-
 import os
 import random
 import re
@@ -18,13 +17,7 @@ BAUD_RATE = 9600
 
 app = Flask(__name__)
 
-MODE_BASE = {
-    "normal": 200,
-    "warning": 400,
-    "danger": 650,
-}
-JITTER = 10
-
+DANGER_OFFSET = 200
 _lock = threading.Lock()
 _state = {
     "source": "hardware",
@@ -36,8 +29,6 @@ _state = {
     "serial_error": None,
 }
 
-
-# ---------- DATABASE ----------
 
 def get_db():
     connection = sqlite3.connect(DB_PATH, timeout=10)
@@ -61,10 +52,8 @@ def init_db():
         connection.commit()
 
 
-# ---------- STATUS AND READINGS ----------
-
 def get_status(reading, threshold):
-    if reading >= threshold + 200:
+    if reading >= min(1023, threshold + DANGER_OFFSET):
         return "DANGER"
     if reading >= threshold:
         return "CAUTION"
@@ -74,7 +63,6 @@ def get_status(reading, threshold):
 def save_reading(reading, mode, threshold, simulated):
     timestamp = datetime.now().isoformat(timespec="seconds")
     status = get_status(reading, threshold)
-
     with get_db() as connection:
         connection.execute("""
             INSERT INTO readings
@@ -85,7 +73,6 @@ def save_reading(reading, mode, threshold, simulated):
             1 if simulated else 0, timestamp
         ))
         connection.commit()
-
     return {
         "reading": reading,
         "mode": mode,
@@ -96,11 +83,22 @@ def save_reading(reading, mode, threshold, simulated):
     }
 
 
-def make_reading(mode):
-    return max(
-        0,
-        MODE_BASE[mode] + random.randint(-JITTER, JITTER)
-    )
+def make_reading(mode, threshold):
+    """Generate a demo reading that matches the selected status for this threshold."""
+    threshold = max(100, min(800, int(threshold)))
+    danger_at = min(1023, threshold + DANGER_OFFSET)
+
+    if mode == "normal":
+        # Always below the selected caution threshold.
+        return random.randint(0, threshold - 1)
+    if mode == "warning":
+        # At/above caution, but below danger whenever that range exists.
+        upper = max(threshold, danger_at - 1)
+        return random.randint(threshold, upper)
+    if mode == "danger":
+        # Always in the danger band, including at the highest threshold.
+        return random.randint(danger_at, 1023)
+    raise ValueError("mode must be normal, warning or danger")
 
 
 def get_threshold():
@@ -111,95 +109,55 @@ def get_threshold():
         return 300
 
 
-# ---------- ARDUINO SERIAL READER ----------
-
 def serial_reader():
     """Read actual numeric sensor readings from the Arduino."""
     pattern = re.compile(r"Gas sensor reading:\s*(\d+)", re.IGNORECASE)
-
     while True:
         try:
             print(f"Connecting to Arduino on {SERIAL_PORT}...")
-
-            with serial.Serial(
-                SERIAL_PORT,
-                BAUD_RATE,
-                timeout=2
-            ) as arduino:
-                # Opening serial may reset the Arduino.
+            with serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=2) as arduino:
                 time.sleep(2)
                 arduino.reset_input_buffer()
-
                 with _lock:
                     _state["serial_connected"] = True
                     _state["serial_error"] = None
-
                 print(f"Arduino connected on {SERIAL_PORT}")
-
                 while True:
-                    line = arduino.readline().decode(
-                        "utf-8", errors="replace"
-                    ).strip()
-
+                    line = arduino.readline().decode("utf-8", errors="replace").strip()
                     match = pattern.search(line)
                     if not match:
                         continue
-
                     reading = int(match.group(1))
-
-                    # Arduino UNO analogRead normally returns 0–1023.
                     if not 0 <= reading <= 1023:
                         print("Ignoring invalid reading:", reading)
                         continue
-
-                    timestamp = datetime.now().isoformat(
-                        timespec="seconds"
-                    )
-
+                    timestamp = datetime.now().isoformat(timespec="seconds")
                     with _lock:
                         threshold = _state["threshold"]
                         source = _state["source"]
                         _state["latest_reading"] = reading
                         _state["last_reading_time"] = timestamp
-
-                    # Save hardware readings only when hardware mode
-                    # is selected. Simulation remains independent.
                     if source == "hardware":
-                        save_reading(
-                            reading,
-                            "hardware",
-                            threshold,
-                            simulated=False
-                        )
-
+                        save_reading(reading, "hardware", threshold, simulated=False)
         except (serial.SerialException, OSError) as error:
             with _lock:
                 _state["serial_connected"] = False
                 _state["serial_error"] = str(error)
-
             print("Arduino serial connection unavailable:", error)
             print("Retrying in 3 seconds...")
             time.sleep(3)
 
 
-# ---------- WEB PAGE ----------
-
 @app.route("/")
 def index():
-    if os.path.exists(
-        os.path.join(BASE_DIR, "templates", "dashboard.html")
-    ):
+    if os.path.exists(os.path.join(BASE_DIR, "templates", "dashboard.html")):
         return render_template("dashboard.html")
-
     return send_from_directory(BASE_DIR, "dashboard.html")
 
-
-# ---------- LATEST READING ----------
 
 @app.route("/api/reading")
 def get_reading():
     threshold = get_threshold()
-
     with _lock:
         _state["threshold"] = threshold
         source = _state["source"]
@@ -210,10 +168,8 @@ def get_reading():
         error = _state["serial_error"]
 
     if source == "simulation":
-        reading = make_reading(mode)
-        payload = save_reading(
-            reading, mode, threshold, simulated=True
-        )
+        reading = make_reading(mode, threshold)
+        payload = save_reading(reading, mode, threshold, simulated=True)
         payload["source"] = "simulation"
         payload["connected"] = connected
         return jsonify(payload)
@@ -243,39 +199,23 @@ def get_reading():
     })
 
 
-# ---------- SWITCH DATA SOURCE ----------
-
 @app.route("/api/source", methods=["POST"])
 def set_source():
     data = request.get_json(silent=True) or {}
     source = data.get("source")
-
     if source not in ("hardware", "simulation"):
-        return jsonify({
-            "error": "source must be hardware or simulation"
-        }), 400
-
+        return jsonify({"error": "source must be hardware or simulation"}), 400
     with _lock:
         _state["source"] = source
+    return jsonify({"source": source, "message": f"Data source changed to {source}"})
 
-    return jsonify({
-        "source": source,
-        "message": f"Data source changed to {source}"
-    })
-
-
-# ---------- EXISTING SIMULATION BUTTONS ----------
 
 @app.route("/api/simulate", methods=["POST"])
 def simulate():
     data = request.get_json(silent=True) or {}
     mode = data.get("mode")
-
-    if mode not in MODE_BASE:
-        return jsonify({
-            "error": "mode must be normal, warning or danger"
-        }), 400
-
+    if mode not in ("normal", "warning", "danger"):
+        return jsonify({"error": "mode must be normal, warning or danger"}), 400
     try:
         threshold = int(data.get("threshold", 300))
         threshold = max(100, min(800, threshold))
@@ -287,15 +227,12 @@ def simulate():
         _state["mode"] = mode
         _state["threshold"] = threshold
 
-    reading = make_reading(mode)
-    payload = save_reading(
-        reading, mode, threshold, simulated=True
-    )
+    reading = make_reading(mode, threshold)
+    payload = save_reading(reading, mode, threshold, simulated=True)
     payload["source"] = "simulation"
+    payload["connected"] = _state["serial_connected"]
     return jsonify(payload)
 
-
-# ---------- DATABASE HISTORY ----------
 
 @app.route("/api/history")
 def get_history():
@@ -304,16 +241,11 @@ def get_history():
         limit = max(1, min(500, limit))
     except (ValueError, TypeError):
         limit = 50
-
     with get_db() as connection:
         rows = connection.execute("""
-            SELECT id, gas_reading, mode, status,
-                   threshold, simulated, timestamp
-            FROM readings
-            ORDER BY id DESC
-            LIMIT ?
+            SELECT id, gas_reading, mode, status, threshold, simulated, timestamp
+            FROM readings ORDER BY id DESC LIMIT ?
         """, (limit,)).fetchall()
-
     return jsonify([dict(row) for row in rows])
 
 
@@ -325,7 +257,6 @@ def get_stats():
                    MAX(gas_reading) AS highest_reading
             FROM readings
         """).fetchone()
-
     return jsonify({
         "total_readings": result["total_readings"],
         "highest_reading": result["highest_reading"],
@@ -333,25 +264,11 @@ def get_stats():
     })
 
 
-# ---------- START APPLICATION ----------
-
 if __name__ == "__main__":
     init_db()
-
-    reader_thread = threading.Thread(
-        target=serial_reader,
-        daemon=True
-    )
+    reader_thread = threading.Thread(target=serial_reader, daemon=True)
     reader_thread.start()
-
     print("SQLite database:", DB_PATH)
     print("Arduino port:", SERIAL_PORT)
     print("Dashboard: http://127.0.0.1:5000")
-
-    # Disable the reloader so it doesn't create a second serial reader.
-    app.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=True,
-        use_reloader=False
-    )
+    app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=False)
